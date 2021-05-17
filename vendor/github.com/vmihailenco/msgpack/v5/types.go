@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/vmihailenco/tagparser"
+	"github.com/vmihailenco/tagparser/v2"
 )
 
 var errorType = reflect.TypeOf((*error)(nil)).Elem()
@@ -97,12 +97,12 @@ type field struct {
 	decoder   decoderFunc
 }
 
-func (f *field) Omit(strct reflect.Value) bool {
+func (f *field) Omit(strct reflect.Value, forced bool) bool {
 	v, ok := fieldByIndex(strct, f.index)
 	if !ok {
 		return true
 	}
-	return f.omitEmpty && isEmptyValue(v)
+	return (f.omitEmpty || forced) && isEmptyValue(v)
 }
 
 func (f *field) EncodeValue(e *Encoder, strct reflect.Value) error {
@@ -152,15 +152,15 @@ func (fs *fields) warnIfFieldExists(name string) {
 	}
 }
 
-func (fs *fields) OmitEmpty(strct reflect.Value) []*field {
-	if !fs.hasOmitEmpty {
+func (fs *fields) OmitEmpty(strct reflect.Value, forced bool) []*field {
+	if !fs.hasOmitEmpty && !forced {
 		return fs.List
 	}
 
 	fields := make([]*field, 0, len(fs.List))
 
 	for _, f := range fs.List {
-		if !f.Omit(strct) {
+		if !f.Omit(strct, forced) {
 			fields = append(fields, f)
 		}
 	}
@@ -313,7 +313,14 @@ func shouldInline(fs *fields, typ reflect.Type, f *field, tag string) bool {
 	return true
 }
 
+type isZeroer interface {
+	IsZero() bool
+}
+
 func isEmptyValue(v reflect.Value) bool {
+	if z, ok := v.Interface().(isZeroer); ok {
+		return nilable(v.Kind()) && v.IsNil() || z.IsZero()
+	}
 	switch v.Kind() {
 	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
 		return v.Len() == 0
